@@ -21,8 +21,8 @@ async def submit_feed_endpoint(
     return await submit_feed(payload, session, redis_client)
 
 
-@router.get("/get_task")
-async def get_task_endpoint(
+@router.get("/get_task_status")
+async def get_task_status_endpoint(
     id: int,
     session=Depends(get_async_session),
 ):

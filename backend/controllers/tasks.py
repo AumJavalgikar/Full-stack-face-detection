@@ -40,11 +40,8 @@ async def fetch_task(task_id, session):
 
     return {
         "id": task.id,
-        "feed_url": task.video_feed,
-        "video_feed": task.video_feed,
-        "roi_data": task.roi_data,
+        "url": task.video_feed,
         "status": task.status,
-        "state": task.state,
     }
 
 
