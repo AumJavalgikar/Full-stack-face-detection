@@ -1,9 +1,11 @@
 import json
 
+import uuid
+from fastapi import UploadFile, HTTPException
 from sqlalchemy import select
-
 from backend.db.models import Tasks
 from backend.db.schemas.tasks import SubmitFeedRequest
+from backend.config import s3_bucket, s3_endpoint
 
 
 async def submit_feed(payload: SubmitFeedRequest, session, redis_client):
@@ -78,3 +80,25 @@ async def fetch_history(session):
         }
         for task in tasks
     ]
+
+
+async def upload_feed(file: UploadFile, storage_client):
+    
+    if not s3_bucket:
+        raise HTTPException(status_code=500, detail="S3_BUCKET is not set")
+    
+    key = f"feeds/{uuid.uuid4().hex}.mp4"
+    
+    content = await file.read()
+
+    storage_client.put_object(
+        Bucket=s3_bucket,
+        Key=key,
+        Body=content,
+        ContentType=file.content_type or "video/mp4",
+        ACL="public-read"
+    )
+
+    return {
+        "url": f"{s3_endpoint}/{s3_bucket}/{key}",
+    }
