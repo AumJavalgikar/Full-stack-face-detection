@@ -45,6 +45,24 @@ async def fetch_task(task_id, session):
     }
 
 
+async def fetch_feed_data(task_id, session):
+    query = select(Tasks).where(Tasks.id == task_id, Tasks.state == "live")
+    result = await session.execute(query)
+    task = result.scalar_one_or_none()
+
+    if task is None:
+        return None
+
+    return {
+        "id": task.id,
+        "url": task.video_feed,
+        "video_feed": task.video_feed,
+        "roi_data": task.roi_data,
+        "status": task.status,
+        "state": task.state,
+    }
+
+
 async def fetch_history(session):
     query = select(Tasks).where(Tasks.state == "live").order_by(Tasks.id.desc())
     result = await session.execute(query)
