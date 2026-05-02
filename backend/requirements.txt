@@ -4,3 +4,5 @@ redis
 sqlalchemy>=2.0
 asyncpg
 python-dotenv
+boto3
+python-multipart
