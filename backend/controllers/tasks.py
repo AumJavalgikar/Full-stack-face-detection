@@ -46,3 +46,20 @@ async def fetch_task(task_id, session):
         "status": task.status,
         "state": task.state,
     }
+
+
+async def fetch_history(session):
+    query = select(Tasks).where(Tasks.state == "live").order_by(Tasks.id.desc())
+    result = await session.execute(query)
+    tasks = result.scalars().all()
+
+    return [
+        {
+            "id": task.id,
+            "feed_url": task.video_feed,
+            "video_feed": task.video_feed,
+            "status": task.status,
+            "state": task.state,
+        }
+        for task in tasks
+    ]

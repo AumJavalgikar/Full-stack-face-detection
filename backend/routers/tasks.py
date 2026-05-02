@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 
-from backend.controllers.tasks import fetch_task, submit_feed
+from backend.controllers.tasks import fetch_history, fetch_task, submit_feed
 from backend.db.schemas.tasks import SubmitFeedRequest
 from backend.db.sessions import get_async_session
 from backend.msg_queue.redis_client import RedisClient
@@ -30,3 +30,10 @@ async def get_task_endpoint(
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
+
+
+@router.get("/history")
+async def history_endpoint(
+    session=Depends(get_async_session),
+):
+    return await fetch_history(session)
