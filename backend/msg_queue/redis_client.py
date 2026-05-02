@@ -2,13 +2,22 @@ import redis
 
 
 class RedisClient:
-    _instance = None
+    _instances = {}
 
     def __new__(cls, *args, **kwargs):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialize(*args, **kwargs)
-        return cls._instance
+        key = (
+            kwargs.get("host", "localhost"),
+            kwargs.get("port", 6379),
+            kwargs.get("db", 0),
+            kwargs.get("password", None),
+            kwargs.get("max_connections", 50),
+            kwargs.get("decode_responses", True),
+        )
+        if key not in cls._instances:
+            instance = super().__new__(cls)
+            instance._initialize(*args, **kwargs)
+            cls._instances[key] = instance
+        return cls._instances[key]
 
     def _initialize(
         self,
