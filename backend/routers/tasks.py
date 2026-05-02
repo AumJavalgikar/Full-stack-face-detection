@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
-from backend.controllers.tasks import submit_feed
+from backend.controllers.tasks import fetch_task, submit_feed
 from backend.db.schemas.tasks import SubmitFeedRequest
 from backend.db.sessions import get_async_session
 from backend.msg_queue.redis_client import RedisClient
@@ -19,4 +19,14 @@ async def submit_feed_endpoint(
     redis_client=Depends(get_redis_client),
 ):
     return await submit_feed(payload, session, redis_client)
- 
+
+
+@router.get("/get_task")
+async def get_task_endpoint(
+    id: int,
+    session=Depends(get_async_session),
+):
+    task = await fetch_task(id, session)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
