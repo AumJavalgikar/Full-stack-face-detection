@@ -1,4 +1,5 @@
 import redis
+from redis import asyncio as redis_async
 
 
 class RedisClient:
@@ -39,3 +40,12 @@ class RedisClient:
 
     def get_client(self):
         return redis.Redis(connection_pool=self._pool)
+
+    def get_async_client(self):
+        return redis_async.Redis(
+            host=self._pool.connection_kwargs.get("host", "localhost"),
+            port=self._pool.connection_kwargs.get("port", 6379),
+            db=self._pool.connection_kwargs.get("db", 0),
+            password=self._pool.connection_kwargs.get("password", None),
+            decode_responses=self._pool.connection_kwargs.get("decode_responses", True),
+        )
