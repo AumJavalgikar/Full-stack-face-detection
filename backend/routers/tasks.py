@@ -1,0 +1,64 @@
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
+
+from backend.controllers.tasks import fetch_feed_data, fetch_history, fetch_task, submit_feed, upload_feed
+from backend.db.schemas.tasks import SubmitFeedRequest
+from backend.db.sessions import get_async_session
+from backend.msg_queue.redis_client import RedisClient
+from backend.object_store.s3 import StorageClient
+
+router = APIRouter(prefix="/tasks", tags=["tasks"])
+
+
+def get_redis_client():
+    return RedisClient(db=1).get_client()
+
+
+def get_storage_client():
+    return StorageClient().get_client()
+
+
+@router.post("/submit_feed")
+async def submit_feed_endpoint(
+    payload: SubmitFeedRequest,
+    session=Depends(get_async_session),
+    redis_client=Depends(get_redis_client),
+):
+    return await submit_feed(payload, session, redis_client)
+
+
+@router.post("/upload_feed")
+async def upload_feed_endpoint(
+    file: UploadFile,
+    storage_client=Depends(get_storage_client),
+):
+    result = await upload_feed(file, storage_client)
+    return result
+
+
+@router.get("/get_task_status")
+async def get_task_status_endpoint(
+    id: int,
+    session=Depends(get_async_session),
+):
+    task = await fetch_task(id, session)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
+
+
+@router.get("/history")
+async def history_endpoint(
+    session=Depends(get_async_session),
+):
+    return await fetch_history(session)
+
+
+@router.get("/feed_data")
+async def feed_data_endpoint(
+    id: int,
+    session=Depends(get_async_session),
+):
+    task = await fetch_feed_data(id, session)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
