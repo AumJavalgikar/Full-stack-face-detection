@@ -27,12 +27,14 @@ export interface TaskStatusResponse {
   status: string;
 }
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+
 /**
  * Fetches the task history from the backend API.
  * @returns Promise containing the list of tasks
  */
 export const fetchHistory = async (): Promise<ApiResponseTask[]> => {
-  const response = await fetch('http://localhost:8000/tasks/history');
+  const response = await fetch(`${API_BASE_URL}/tasks/history`);
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`);
   }
@@ -47,7 +49,7 @@ export const uploadVideo = async (file: File): Promise<{ url: string }> => {
   const formData = new FormData();
   formData.append('file', file);
 
-  const response = await fetch('http://localhost:8000/tasks/upload_feed', {
+  const response = await fetch(`${API_BASE_URL}/tasks/upload_feed`, {
     method: 'POST',
     body: formData,
   });
@@ -60,7 +62,7 @@ export const uploadVideo = async (file: File): Promise<{ url: string }> => {
  * Submits a new video feed for processing.
  */
 export const submitFeed = async (url: string): Promise<ApiResponseTask> => {
-  const response = await fetch('http://localhost:8000/tasks/submit_feed', {
+  const response = await fetch(`${API_BASE_URL}/tasks/submit_feed`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url }),
@@ -73,7 +75,7 @@ export const submitFeed = async (url: string): Promise<ApiResponseTask> => {
  * Polls for the status of a specific task.
  */
 export const getTaskStatus = async (id: string): Promise<TaskStatusResponse> => {
-  const response = await fetch(`http://localhost:8000/tasks/get_task_status?id=${id}`);
+  const response = await fetch(`${API_BASE_URL}/tasks/get_task_status?id=${id}`);
   if (!response.ok) throw new Error(`Status check failed: ${response.status}`);
   return await response.json();
 };
@@ -83,7 +85,7 @@ export const getTaskStatus = async (id: string): Promise<TaskStatusResponse> => 
  * Handles cases where roi_data is a URL string pointing to a JSON file.
  */
 export const getFeedData = async (id: string): Promise<ApiResponseTask> => {
-  const response = await fetch(`http://localhost:8000/tasks/feed_data?id=${id}`);
+  const response = await fetch(`${API_BASE_URL}/tasks/feed_data?id=${id}`);
   if (!response.ok) throw new Error(`Feed data fetch failed: ${response.status}`);
   const data: ApiResponseTask = await response.json();
 

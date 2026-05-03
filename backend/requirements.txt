@@ -3,6 +3,8 @@ uvicorn[standard]
 redis
 sqlalchemy>=2.0
 asyncpg
+cryptography
+asyncmy
 python-dotenv
 boto3
 python-multipart

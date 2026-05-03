@@ -1,14 +1,17 @@
 import redis
 from redis import asyncio as redis_async
+import os
 
 
 class RedisClient:
     _instances = {}
 
     def __new__(cls, *args, **kwargs):
+        host = kwargs.get("host", os.getenv("REDIS_HOST", "localhost"))
+        port = kwargs.get("port", int(os.getenv("REDIS_PORT", "6379")))
         key = (
-            kwargs.get("host", "localhost"),
-            kwargs.get("port", 6379),
+            host,
+            port,
             kwargs.get("db", 0),
             kwargs.get("password", None),
             kwargs.get("max_connections", 50),
@@ -22,13 +25,15 @@ class RedisClient:
 
     def _initialize(
         self,
-        host="localhost",
-        port=6379,
+        host=None,
+        port=None,
         db=0,
         password=None,
         max_connections=50,
         decode_responses=True,
     ):
+        host = host or os.getenv("REDIS_HOST", "localhost")
+        port = port or int(os.getenv("REDIS_PORT", "6379"))
         self._pool = redis.ConnectionPool(
             host=host,
             port=port,

@@ -3,13 +3,14 @@ import json
 import os
 import subprocess
 import tempfile
-import urllib.request
+import traceback
+from urllib.parse import urlparse
 
 import mediapipe as mp
 import numpy as np
 from sqlalchemy import update
 
-from backend.config import s3_bucket
+from backend.config import s3_bucket, s3_endpoint, s3_public_endpoint
 from backend.db.models import Tasks
 from backend.db.sessions import create_async_session
 from backend.object_store.s3 import StorageClient
@@ -81,6 +82,8 @@ class FeedWorker:
                 stderr=asyncio.subprocess.DEVNULL,
             )
         except Exception as exc:
+            print(f"[worker] Failed to start frame stream for {video_path}: {exc}", flush=True)
+            traceback.print_exc()
             raise RuntimeError(f"Failed to start frame stream for {video_path}") from exc
 
         frame_size = width * height * 3
@@ -133,6 +136,8 @@ class FeedWorker:
             stream = data["streams"][0]
             return int(stream["width"]), int(stream["height"])
         except Exception as exc:
+            print(f"[worker] Failed to read video dimensions for {video_path}: {exc}", flush=True)
+            traceback.print_exc()
             raise RuntimeError(f"Failed to read video dimensions for {video_path}") from exc
 
     async def _store_roi_data(self, task_id, roi_data_url):
@@ -173,22 +178,49 @@ class FeedWorker:
                 ACL="public-read",
             )
 
-            endpoint = os.getenv("S3_ENDPOINT", "").rstrip("/")
+            endpoint = (s3_public_endpoint or s3_endpoint or "").rstrip("/")
             return f"{endpoint}/{s3_bucket}/{key}"
         except Exception as exc:
+            print(f"[worker] Failed to upload ROI data for task {task_id}: {exc}", flush=True)
+            traceback.print_exc()
             raise RuntimeError(f"Failed to upload ROI data for task {task_id}") from exc
 
-    @staticmethod
-    def _download_feed(feed_url):
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-        tmp.close()
-        urllib.request.urlretrieve(feed_url, tmp.name)
-        return tmp.name
+    def _download_feed(self, feed_url):
+        if not s3_bucket:
+            raise RuntimeError("S3_BUCKET is not set")
+
+        parsed = urlparse(feed_url)
+        path_parts = parsed.path.lstrip("/").split("/", 1)
+        if len(path_parts) != 2:
+            raise RuntimeError(f"Invalid S3 feed URL: {feed_url}")
+
+        bucket_name, key = path_parts
+        if bucket_name != s3_bucket:
+            print(
+                f"[worker] Feed URL bucket {bucket_name} does not match configured bucket {s3_bucket}",
+                flush=True,
+            )
+
+        try:
+            response = self.storage_client.get_object(Bucket=bucket_name, Key=key)
+            body = response["Body"].read()
+
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+            tmp.write(body)
+            tmp.flush()
+            tmp.close()
+            return tmp.name
+        except Exception as exc:
+            print(f"[worker] Failed to fetch feed from S3 path {key}: {exc}", flush=True)
+            traceback.print_exc()
+            raise RuntimeError(f"Failed to fetch feed from S3 path {key}") from exc
 
     async def _detect_frame(self, frame):
         try:
             return await asyncio.to_thread(self.face_detector.detect_faces, frame)
         except Exception as exc:
+            print(f"[worker] Failed to detect faces for a frame: {exc}", flush=True)
+            traceback.print_exc()
             raise RuntimeError("Failed to detect faces for frame") from exc
 
     async def process_feed(self, job_data):
@@ -223,6 +255,8 @@ class FeedWorker:
             roi_data_url = await asyncio.to_thread(self._upload_roi_data, task_id, roi_payload)
             await self._store_roi_data(task_id, roi_data_url)
         except Exception:
+            print(f"[worker] Task {task_id} failed", flush=True)
+            traceback.print_exc()
             await self._set_task_status(task_id, "failed")
             raise
         finally:
@@ -241,10 +275,13 @@ class FeedWorker:
                 job_data = json.loads(raw_payload)
                 await self.process_feed(job_data)
             except Exception:
+                print("[worker] Worker loop error", flush=True)
+                traceback.print_exc()
                 await asyncio.sleep(1)
 
 
 async def main():
+    print("Starting face_detect worker..", flush=True)
     worker = FeedWorker()
     await worker.run()
 

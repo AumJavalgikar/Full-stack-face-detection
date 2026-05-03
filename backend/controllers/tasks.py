@@ -5,7 +5,7 @@ from fastapi import UploadFile, HTTPException
 from sqlalchemy import select
 from backend.db.models import Tasks
 from backend.db.schemas.tasks import SubmitFeedRequest
-from backend.config import s3_bucket, s3_endpoint
+from backend.config import s3_bucket, s3_endpoint, s3_public_endpoint
 
 
 async def submit_feed(payload: SubmitFeedRequest, session, redis_client):
@@ -100,6 +100,7 @@ async def upload_feed(file: UploadFile, storage_client):
         ACL="public-read"
     )
 
+    public_endpoint = (s3_public_endpoint or s3_endpoint or "").rstrip("/")
     return {
-        "url": f"{s3_endpoint}/{s3_bucket}/{key}",
+        "url": f"{public_endpoint}/{s3_bucket}/{key}",
     }
