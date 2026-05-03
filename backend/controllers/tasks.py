@@ -1,6 +1,6 @@
+import uuid
 import json
 
-import uuid
 from fastapi import UploadFile, HTTPException
 from sqlalchemy import select
 from backend.db.models import Tasks
@@ -75,6 +75,7 @@ async def fetch_history(session):
             "id": task.id,
             "feed_url": task.video_feed,
             "video_feed": task.video_feed,
+            "roi_data": task.roi_data,
             "status": task.status,
             "state": task.state,
         }

@@ -9,8 +9,10 @@ import mediapipe as mp
 import numpy as np
 from sqlalchemy import update
 
+from backend.config import s3_bucket
 from backend.db.models import Tasks
 from backend.db.sessions import create_async_session
+from backend.object_store.s3 import StorageClient
 from backend.msg_queue.redis_client import RedisClient
 
 
@@ -46,11 +48,24 @@ class FaceDetector:
 
         return boxes
 
+    @staticmethod
+    def scale_boxes(boxes, scale_x, scale_y):
+        return [
+            {
+                "x": int(box["x"] * scale_x),
+                "y": int(box["y"] * scale_y),
+                "w": int(box["w"] * scale_x),
+                "h": int(box["h"] * scale_y),
+            }
+            for box in boxes
+        ]
+
 
 class FeedWorker:
     def __init__(self):
         self.redis_client = RedisClient(db=1).get_async_client()
         self.face_detector = FaceDetector()
+        self.storage_client = StorageClient().get_client()
 
     @staticmethod
     async def stream_frames(video_path, width=640, height=480):
@@ -91,16 +106,68 @@ class FeedWorker:
                 process.terminate()
                 await process.wait()
 
-    async def _store_roi_data(self, task_id, roi_data_json):
+    @staticmethod
+    def _get_video_dimensions(video_path):
+        probe = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=width,height",
+                "-of",
+                "json",
+                video_path,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        data = json.loads(probe.stdout)
+        stream = data["streams"][0]
+        return int(stream["width"]), int(stream["height"])
+
+    async def _store_roi_data(self, task_id, roi_data_url):
         Session = await create_async_session()
         async with Session() as session:
             stmt = (
                 update(Tasks)
                 .where(Tasks.id == task_id)
-                .values(roi_data=roi_data_json, status="completed")
+                .values(roi_data=roi_data_url, status="completed")
             )
             await session.execute(stmt)
             await session.commit()
+
+    async def _set_task_status(self, task_id, status):
+        Session = await create_async_session()
+        async with Session() as session:
+            stmt = (
+                update(Tasks)
+                .where(Tasks.id == task_id)
+                .values(status=status)
+            )
+            await session.execute(stmt)
+            await session.commit()
+
+    def _upload_roi_data(self, task_id, roi_payload):
+        if not s3_bucket:
+            raise RuntimeError("S3_BUCKET is not set")
+
+        key = f"roi-data/task-{task_id}.json"
+        body = json.dumps(roi_payload).encode("utf-8")
+
+        self.storage_client.put_object(
+            Bucket=s3_bucket,
+            Key=key,
+            Body=body,
+            ContentType="application/json",
+            ACL="public-read",
+        )
+
+        endpoint = os.getenv("S3_ENDPOINT", "").rstrip("/")
+        return f"{endpoint}/{s3_bucket}/{key}"
 
     @staticmethod
     def _download_feed(feed_url):
@@ -118,7 +185,13 @@ class FeedWorker:
         video_path = None
 
         try:
+            await self._set_task_status(task_id, "processing")
             video_path = await asyncio.to_thread(self._download_feed, feed_url)
+            original_width, original_height = await asyncio.to_thread(
+                self._get_video_dimensions, video_path
+            )
+            scale_x = original_width / 640
+            scale_y = original_height / 480
 
             roi_payload = {
                 "task_id": task_id,
@@ -131,12 +204,12 @@ class FeedWorker:
                 roi_payload["frames"].append(
                     {
                         "frame_id": frame_id,
-                        "boxes": boxes,
+                        "boxes": self.face_detector.scale_boxes(boxes, scale_x, scale_y),
                     }
                 )
 
-            roi_data_json = json.dumps(roi_payload)
-            await self._store_roi_data(task_id, roi_data_json)
+            roi_data_url = await asyncio.to_thread(self._upload_roi_data, task_id, roi_payload)
+            await self._store_roi_data(task_id, roi_data_url)
         finally:
             if video_path and os.path.exists(video_path):
                 os.remove(video_path)
