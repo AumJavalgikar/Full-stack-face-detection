@@ -69,16 +69,19 @@ class FeedWorker:
 
     @staticmethod
     async def stream_frames(video_path, width=640, height=480):
-        process = await asyncio.create_subprocess_exec(
-            "ffmpeg",
-            "-i", video_path,
-            "-vf", f"scale={width}:{height}",
-            "-f", "rawvideo",
-            "-pix_fmt", "rgb24",
-            "-",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "ffmpeg",
+                "-i", video_path,
+                "-vf", f"scale={width}:{height}",
+                "-f", "rawvideo",
+                "-pix_fmt", "rgb24",
+                "-",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Failed to start frame stream for {video_path}") from exc
 
         frame_size = width * height * 3
         frame_id = 0
@@ -108,26 +111,29 @@ class FeedWorker:
 
     @staticmethod
     def _get_video_dimensions(video_path):
-        probe = subprocess.run(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-select_streams",
-                "v:0",
-                "-show_entries",
-                "stream=width,height",
-                "-of",
-                "json",
-                video_path,
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        data = json.loads(probe.stdout)
-        stream = data["streams"][0]
-        return int(stream["width"]), int(stream["height"])
+        try:
+            probe = subprocess.run(
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "stream=width,height",
+                    "-of",
+                    "json",
+                    video_path,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            data = json.loads(probe.stdout)
+            stream = data["streams"][0]
+            return int(stream["width"]), int(stream["height"])
+        except Exception as exc:
+            raise RuntimeError(f"Failed to read video dimensions for {video_path}") from exc
 
     async def _store_roi_data(self, task_id, roi_data_url):
         Session = await create_async_session()
@@ -152,22 +158,25 @@ class FeedWorker:
             await session.commit()
 
     def _upload_roi_data(self, task_id, roi_payload):
-        if not s3_bucket:
-            raise RuntimeError("S3_BUCKET is not set")
+        try:
+            if not s3_bucket:
+                raise RuntimeError("S3_BUCKET is not set")
 
-        key = f"roi-data/task-{task_id}.json"
-        body = json.dumps(roi_payload).encode("utf-8")
+            key = f"roi-data/task-{task_id}.json"
+            body = json.dumps(roi_payload).encode("utf-8")
 
-        self.storage_client.put_object(
-            Bucket=s3_bucket,
-            Key=key,
-            Body=body,
-            ContentType="application/json",
-            ACL="public-read",
-        )
+            self.storage_client.put_object(
+                Bucket=s3_bucket,
+                Key=key,
+                Body=body,
+                ContentType="application/json",
+                ACL="public-read",
+            )
 
-        endpoint = os.getenv("S3_ENDPOINT", "").rstrip("/")
-        return f"{endpoint}/{s3_bucket}/{key}"
+            endpoint = os.getenv("S3_ENDPOINT", "").rstrip("/")
+            return f"{endpoint}/{s3_bucket}/{key}"
+        except Exception as exc:
+            raise RuntimeError(f"Failed to upload ROI data for task {task_id}") from exc
 
     @staticmethod
     def _download_feed(feed_url):
@@ -177,7 +186,10 @@ class FeedWorker:
         return tmp.name
 
     async def _detect_frame(self, frame):
-        return await asyncio.to_thread(self.face_detector.detect_faces, frame)
+        try:
+            return await asyncio.to_thread(self.face_detector.detect_faces, frame)
+        except Exception as exc:
+            raise RuntimeError("Failed to detect faces for frame") from exc
 
     async def process_feed(self, job_data):
         task_id = job_data["id"]
@@ -210,20 +222,26 @@ class FeedWorker:
 
             roi_data_url = await asyncio.to_thread(self._upload_roi_data, task_id, roi_payload)
             await self._store_roi_data(task_id, roi_data_url)
+        except Exception:
+            await self._set_task_status(task_id, "failed")
+            raise
         finally:
             if video_path and os.path.exists(video_path):
                 os.remove(video_path)
 
     async def run(self):
         while True:
-            job = await self.redis_client.blpop("feed_tasks", timeout=1)
-            if job is None:
-                await asyncio.sleep(1)
-                continue
+            try:
+                job = await self.redis_client.blpop("feed_tasks", timeout=1)
+                if job is None:
+                    await asyncio.sleep(1)
+                    continue
 
-            _, raw_payload = job
-            job_data = json.loads(raw_payload)
-            await self.process_feed(job_data)
+                _, raw_payload = job
+                job_data = json.loads(raw_payload)
+                await self.process_feed(job_data)
+            except Exception:
+                await asyncio.sleep(1)
 
 
 async def main():
