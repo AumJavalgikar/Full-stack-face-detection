@@ -42,6 +42,11 @@ Initially, I stored ROI data as stringified JSON in the database. However, this 
 
 Due to the atomic properties of redis, we never have to worry about a race condition between multiple workers picking up the same task.
 
+## Demo
+
+![Demo](docs/output.gif)
+
+
 ## Running guide
 
 It is highly recommended to use Docker to run the application.
