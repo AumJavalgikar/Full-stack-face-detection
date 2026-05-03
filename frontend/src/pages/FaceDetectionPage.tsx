@@ -7,10 +7,7 @@ import {
   Clock, 
   AlertCircle, 
   ChevronRight, 
-  Maximize2, 
   FileVideo,
-  MoreVertical,
-  Search
 } from 'lucide-react';
 import { fetchHistory, submitFeed, getTaskStatus, getFeedData, uploadVideo } from '../api';
 import type { RoiData } from '../api';
@@ -37,6 +34,7 @@ interface Task {
   results?: BoundingBox[];
   progress: number;
   roiData?: RoiData;
+  roiError?: boolean;
 }
 
 // --- Mock Data ---
@@ -71,24 +69,23 @@ const MOCK_TASKS: Task[] = [
 ];
 
 export default function FaceDetectionPage() {
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [tasks, setTasks] = useState<Task[]>(MOCK_TASKS);
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(MOCK_TASKS[0]?.id ?? null);
   const [isUploading, setIsUploading] = useState(false);
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
   // --- API Fetching ---
   const loadHistory = async () => {
-    setIsLoadingHistory(true);
     try {
       const data = await fetchHistory();
       
       const mappedTasks: Task[] = data.map(item => ({
         id: item.id.toString(),
         name: item.feed_url.split('/').pop() || `Task ${item.id}`,
-        status: (item.status === 'started' ? 'processing' : item.status) as TaskStatus,
+        status: item.status as TaskStatus,
         timestamp: new Date().toLocaleString(),
         videoUrl: item.video_feed,
         progress: item.status === 'completed' ? 100 : 0,
+        roiError: false,
       }));
 
       setTasks(mappedTasks);
@@ -97,8 +94,6 @@ export default function FaceDetectionPage() {
       }
     } catch (error) {
       console.error("Failed to fetch history:", error);
-    } finally {
-      setIsLoadingHistory(false);
     }
   };
 
@@ -121,18 +116,21 @@ export default function FaceDetectionPage() {
         try {
           const finalData = await getFeedData(task.id);
           const roi = finalData.roi_data as RoiData | undefined;
+          const results = roi?.frames.flatMap(f => 
+            f.boxes.map(b => ({
+              x: b.x, y: b.y, width: b.w, height: b.h, label: 'Face', confidence: 1.0, frameId: f.frame_id
+            }))
+          ) ?? [];
 
           setTasks(prev => prev.map(t => t.id === task.id ? {
             ...t,
             roiData: roi,
-            results: roi?.frames.flatMap(f => 
-              f.boxes.map(b => ({
-                x: b.x, y: b.y, width: b.w, height: b.h, label: 'Face', confidence: 1.0, frameId: f.frame_id
-              }))
-            )
+            roiError: !roi,
+            results,
           } : t));
         } catch (err) {
           console.error("Failed to lazy load ROI data:", err);
+          setTasks(prev => prev.map(t => t.id === task.id ? { ...t, roiError: true, results: [] } : t));
         }
       }
     };
@@ -151,6 +149,11 @@ export default function FaceDetectionPage() {
           if (statusRes.status === 'completed') {
             const finalData = await getFeedData(task.id);
             const roi = finalData.roi_data as RoiData | undefined;
+            const results = roi?.frames.flatMap(f => 
+              f.boxes.map(b => ({
+                x: b.x, y: b.y, width: b.w, height: b.h, label: 'Face', confidence: 1.0, frameId: f.frame_id
+              }))
+            ) ?? [];
 
             setTasks(prev => prev.map(t => t.id === task.id ? {
               ...t,
@@ -158,11 +161,8 @@ export default function FaceDetectionPage() {
               progress: 100,
               videoUrl: finalData.video_feed,
               roiData: roi,
-              results: roi?.frames.flatMap(f => 
-                f.boxes.map(b => ({
-                  x: b.x, y: b.y, width: b.w, height: b.h, label: 'Face', confidence: 1.0, frameId: f.frame_id
-                }))
-              )
+              roiError: !roi,
+              results,
             } : t));
           }
         } catch (err) {
@@ -406,17 +406,23 @@ export default function FaceDetectionPage() {
                     data-uid='div-7e4a5fa4'>
                     {activeTask?.status === 'processing' || activeTask?.status === 'started' ? (
                       <div className="w-8 h-8 border-2 border-white/20 border-t-white rounded-full animate-spin" data-uid='loader-spinner' />
+                    ) : activeTask?.status === 'failed' ? (
+                      <AlertCircle className="text-white/40" size={32} data-uid='filevideo-failed' />
                     ) : (
                       <FileVideo className="text-white/40" size={32} data-uid='filevideo-e343447c' />
                     )}
                   </div>
                   <div data-uid='div-b0bccbf4'>
                     <h3 className="text-white font-medium" data-uid='h3-5aca4333'>
-                      {activeTask?.status === 'processing' || activeTask?.status === 'started' ? 'Processing Video...' : 'No Video Selected'}
+                      {activeTask?.status === 'processing' || activeTask?.status === 'started'
+                        ? 'Processing Video...'
+                        : activeTask?.status === 'failed'
+                          ? 'Processing Failed'
+                          : 'No Video Selected'}
                     </h3>
                     <p className="text-white/40 text-sm mt-1" data-uid='p-763be1f6'>
-                      {activeTask?.status === 'processing' || activeTask?.status === 'started'
-                        ? `Analyzing frames... ${activeTask.progress}%` 
+                      {activeTask?.status === 'failed'
+                        ? 'The task failed to process the video.'
                         : 'Select a completed task to view results'}
                     </p>
                   </div>
@@ -437,7 +443,14 @@ export default function FaceDetectionPage() {
                 data-uid='h2-f0177d76'>Detection Data</h2>
             </div>
             <div className="flex-1 overflow-y-auto p-5 space-y-6" data-uid='div-f15f3167'>
-              {activeTask?.results ? (
+              {activeTask?.roiError ? (
+                <div
+                  className="h-full flex flex-col items-center justify-center text-center opacity-40"
+                  data-uid='div-aa0edd32'>
+                  <AlertCircle size={32} className="mb-2" data-uid='alertcircle-725e80f5' />
+                  <p className="text-sm" data-uid='p-fc5d684a'>ROI data unavailable</p>
+                </div>
+              ) : activeTask?.results?.length ? (
                 <div className="space-y-4" data-uid='div-3bc3ef6c'>
                   <div className="flex items-center justify-between" data-uid='div-62ba9428'>
                     <span className="text-sm text-[#6b7280]" data-uid='span-97b8a7e9'>Total Detections</span>
@@ -523,12 +536,13 @@ function StatusBadge({ status }: { status: TaskStatus }) {
   };
 
   const displayLabel = status === 'started' ? 'processing' : status;
+  const normalizedStatus = status === 'started' ? 'processing' : status;
 
   return (
     <span
-      className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-tight ${styles[status]}`}
+      className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-tight ${styles[normalizedStatus] ?? styles.failed}`}
       data-uid='span-629588ad'>
-      {icons[status]}
+      {icons[normalizedStatus] ?? icons.failed}
       {displayLabel}
     </span>
   );
