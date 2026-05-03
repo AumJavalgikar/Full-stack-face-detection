@@ -84,7 +84,7 @@ export default function FaceDetectionPage() {
         status: item.status as TaskStatus,
         timestamp: new Date().toLocaleString(),
         videoUrl: item.video_feed,
-        progress: item.status === 'completed' ? 100 : 0,
+        progress: item.status === 'completed' ? 100 : item.status === 'failed' ? 0 : 10,
         roiError: false,
       }));
 
@@ -332,7 +332,7 @@ export default function FaceDetectionPage() {
                 <StatusBadge status={task.status} data-uid='statusbadge-7ccc35b7' />
               </div>
               <h3 className="text-sm font-medium truncate pr-4" data-uid='h3-00eb18bb'>{task.name}</h3>
-              {task.status === 'processing' && (
+              {(task.status === 'started' || task.status === 'processing') && (
                 <div
                   className="mt-2 w-full bg-[#f3f4f6] h-1 rounded-full overflow-hidden"
                   data-uid='div-c063eabe'>
@@ -414,14 +414,20 @@ export default function FaceDetectionPage() {
                   </div>
                   <div data-uid='div-b0bccbf4'>
                     <h3 className="text-white font-medium" data-uid='h3-5aca4333'>
-                      {activeTask?.status === 'processing' || activeTask?.status === 'started'
-                        ? 'Processing Video...'
+                      {activeTask?.status === 'started'
+                        ? 'Task Started'
+                        : activeTask?.status === 'processing'
+                          ? 'Processing Video...'
                         : activeTask?.status === 'failed'
                           ? 'Processing Failed'
                           : 'No Video Selected'}
                     </h3>
                     <p className="text-white/40 text-sm mt-1" data-uid='p-763be1f6'>
-                      {activeTask?.status === 'failed'
+                      {activeTask?.status === 'started'
+                        ? 'Waiting for a worker to pick up the job.'
+                        : activeTask?.status === 'processing'
+                          ? `Analyzing frames... ${activeTask.progress}%`
+                          : activeTask?.status === 'failed'
                         ? 'The task failed to process the video.'
                         : 'Select a completed task to view results'}
                     </p>
@@ -522,7 +528,7 @@ function StatusBadge({ status }: { status: TaskStatus }) {
   const styles = {
     pending: 'bg-[#f3f4f6] text-[#6b7280]',
     processing: 'bg-[#eff6ff] text-[#2563eb]',
-    started: 'bg-[#eff6ff] text-[#2563eb]',
+    started: 'bg-[#fff7ed] text-[#c2410c]',
     completed: 'bg-[#f0fdf4] text-[#16a34a]',
     failed: 'bg-[#fef2f2] text-[#dc2626]',
   };
@@ -530,13 +536,13 @@ function StatusBadge({ status }: { status: TaskStatus }) {
   const icons = {
     pending: <Clock size={10} data-uid='clock-40584055' />,
     processing: <Play size={10} className="animate-pulse" data-uid='play-1473a816' />,
-    started: <Play size={10} className="animate-pulse" data-uid='play-1473a816' />,
+    started: <Clock size={10} data-uid='clock-started' />,
     completed: <CheckCircle2 size={10} data-uid='checkcircle2-71d10e3e' />,
     failed: <AlertCircle size={10} data-uid='alertcircle-3297972d' />,
   };
 
-  const displayLabel = status === 'started' ? 'processing' : status;
-  const normalizedStatus = status === 'started' ? 'processing' : status;
+  const displayLabel = status;
+  const normalizedStatus = status;
 
   return (
     <span
